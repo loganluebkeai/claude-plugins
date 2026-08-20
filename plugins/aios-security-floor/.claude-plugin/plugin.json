@@ -2,7 +2,7 @@
   "name": "aios-security-floor",
   "displayName": "TrueNorth AIOS Security Floor",
   "description": "The security floor for TrueNorth AIOS client machines: a PreToolUse guard that blocks catastrophic-and-irreversible actions in every permission mode (including bypass), plus a Claude Code version watcher. Blocks only what is catastrophic; normal work never triggers it.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "TrueNorth Intell",
     "url": "https://truenorthintell.com"
