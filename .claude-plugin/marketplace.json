@@ -1,0 +1,16 @@
+{
+  "name": "truenorth",
+  "description": "Claude Code plugins from TrueNorth Intell for AIOS client machines: the security floor and its companions.",
+  "owner": {
+    "name": "TrueNorth Intell",
+    "url": "https://truenorthintell.com"
+  },
+  "plugins": [
+    {
+      "name": "aios-security-floor",
+      "source": "./plugins/aios-security-floor",
+      "description": "The security floor for TrueNorth AIOS client machines. A PreToolUse guard that blocks catastrophic, irreversible actions in every permission mode - including bypass - plus a Claude Code version watcher. Your keys stay private, even from the assistant.",
+      "category": "security"
+    }
+  ]
+}
