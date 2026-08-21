@@ -11,7 +11,7 @@
 // Per-client copy at .claude/hooks/check-claude-code-version.mjs (injected by
 // installer build scripts; never operator-edited inside a client workspace).
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,17 +29,29 @@ function emit(additionalContext) {
   process.stdout.write(JSON.stringify(out));
 }
 
+const EXEC_OPTS = {
+  encoding: 'utf8',
+  timeout: 3000,
+  stdio: ['ignore', 'pipe', 'ignore'],
+};
+
+function parseVersion(out) {
+  const match = out.match(/(\d+\.\d+\.\d+)/);
+  return match ? match[1] : null;
+}
+
 function getInstalledVersion() {
-  // execFileSync (no shell) -- safe even though args are hard-coded.
-  try {
-    const out = execFileSync('claude', ['--version'], {
-      encoding: 'utf8',
-      timeout: 3000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const match = out.match(/(\d+\.\d+\.\d+)/);
-    return match ? match[1] : null;
-  } catch { return null; }
+  // Attempt 1: no shell -- works where claude is a real executable (native
+  // installs, unix). Attempt 2: shell -- npm installs on Windows ship claude
+  // as .cmd/.ps1/sh shims with no .exe, and execFileSync without a shell
+  // cannot spawn those (instant ENOENT, caught + silent). The 2026-08-21
+  // dissection found every fleet box is that case: the no-shell form had
+  // never resolved a version anywhere. Command + args are hard-coded, so
+  // shell use is safe.
+  try { return parseVersion(execFileSync('claude', ['--version'], EXEC_OPTS)); }
+  catch {}
+  try { return parseVersion(execSync('claude --version', EXEC_OPTS)); }
+  catch { return null; }
 }
 
 async function getLatestVersion() {
@@ -78,9 +90,15 @@ function buildNudge(installed, latest) {
 }
 
 async function main() {
-  const installed = getInstalledVersion();
-  if (!installed) return emit(null);
   const now = Date.now();
+  const installed = getInstalledVersion();
+  if (!installed) {
+    // Leave a trace: an absent cache file must mean "never ran," not "ran and
+    // bailed" (the 2026-08-21 laptop finding was exactly that ambiguity). An
+    // error-shaped entry carries no `latest`, so it never suppresses a check.
+    writeCache({ timestamp: now, error: 'installed-version-unresolved' });
+    return emit(null);
+  }
   const cached = readCache();
   if (cached && now - cached.timestamp < CACHE_TTL_MS && typeof cached.latest === 'string') {
     if (compareVersions(installed, cached.latest) < 0) return emit(buildNudge(installed, cached.latest));
