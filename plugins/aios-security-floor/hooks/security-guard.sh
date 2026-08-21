@@ -136,6 +136,8 @@ fi
 #    the client, deliberately) touches the sentinel, then edits within 15 min.
 #
 #      touch <workspace>/.claude/hooks/.maintenance
+#      (plugin-carried guard: touch .maintenance beside the cached hook;
+#       .claude/plugins is gated too since v1.2.0, 2026-08-21)
 #
 #    Two deliberate steps beats one injected instruction.
 # =========================================================================
@@ -151,7 +153,7 @@ maint_open() {
 }
 
 targets_gate() {
-  [[ "$1" == *".claude/hooks"* || "$1" == *".claude/settings.json"* ]]
+  [[ "$1" == *".claude/hooks"* || "$1" == *".claude/settings.json"* || "$1" == *".claude/plugins"* ]]
 }
 
 if targets_gate "$FILE" || targets_gate "$CMD_N"; then
@@ -164,7 +166,7 @@ if targets_gate "$FILE" || targets_gate "$CMD_N"; then
     WRITEISH=1
   fi
   if [ "$WRITEISH" -eq 1 ] && ! maint_open; then
-    block "Security floor: the gate protects itself. To edit it deliberately: touch .claude/hooks/.maintenance in the workspace, then retry within 15 minutes."
+    block "Security floor: the gate protects itself. To edit it deliberately: touch a .maintenance file beside security-guard.sh (workspace .claude/hooks/ or the plugin cache hooks/ dir), then retry within 15 minutes."
   fi
 fi
 
