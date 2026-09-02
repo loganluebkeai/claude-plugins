@@ -3,6 +3,19 @@
 One line per release. The plugin's `version` in plugin.json is the update
 signal; refresh with `/plugin marketplace update truenorth`.
 
+- **1.3.0** (2026-09-02): Escape-route pass. Section 5: a nested `claude`
+  launch with the floor switched off (`--safe-mode`, `--restricted`,
+  `--settings`, `--setting-sources`, `--plugin-dir`, or a `CLAUDE_CONFIG_DIR=`
+  redirect) is blocked; plain `claude -p`, `--version` and `update` stay
+  silent. Section 6: a file leaving the machine (curl/wget upload forms,
+  `Invoke-RestMethod -InFile`, scp/rsync/sftp to a remote host) or a Gmail
+  send/forward through the connector asks first - a real prompt in default
+  and acceptEdits modes; under bypass it is not a prompt (bypass has opted
+  out of prompts). Self-protection gate widened to `.claude/settings.local.json`,
+  `.mcp.json` and `~/.claude.json`; `/run/aios/` joins the secret paths.
+  Command extractor rewritten as an escape-aware walker (a quoted
+  `curl -F "file=@x"` no longer hides its upload marker). Stderr redirects no
+  longer count as writes. Battery: 89 cases.
 - **1.2.0** (2026-08-21): Guard self-protection extended to the plugin cache -
   writes to `.claude/plugins` are blocked, with the same 15-minute
   `.maintenance` escape hatch the workspace gate uses.
