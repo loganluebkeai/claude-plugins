@@ -1,6 +1,9 @@
 #!/bin/bash
 # PreToolUse security hook - CLIENT CUT (v1, ported from operator v3 2026-08-12;
-# gate widened + sections 5 and 6 added 2026-09-01 - ships as plugin v1.3.0)
+# gate widened + sections 5 and 6 added 2026-09-01 - plugin v1.3.0;
+# 2026-09-02 audit fixes - plugin v1.4.0: backslash-path bypass of the
+# self-protection gate, an assistant-creatable maintenance sentinel, and
+# code-execution tools that carry no command/file_path field)
 # TrueNorth Intell / AIOS. Exit 0 = allow, exit 2 = hard block.
 #
 # DESIGN RULE (unchanged from v3)
@@ -33,6 +36,15 @@
 #   * 2026-09-01: section 5 (nested launch with the floor off = BLOCK),
 #     section 6 (file leaving the machine / email send = ASK), /run/aios/
 #     (the age tmpfs decrypt path on a hands box) joins the secret paths
+#   * 2026-09-02 (workspace audit, three bypasses verified by behavior):
+#     section 0 blocks code-execution tools by NAME (python_repl, executeCode,
+#     run_command) - they carry `code`, not `command`, and walked past every
+#     check; path normalization collapses the doubled slashes a JSON-escaped
+#     backslash pair leaves (C:\\x -> C://x), which had silently un-gated every
+#     self-protection target on Windows spellings; section 4a makes the
+#     maintenance sentinel something only a person at their own terminal can
+#     create (touch/New-Item/echo were not write verbs, so the assistant could
+#     open its own window and edit the gate in one turn)
 #
 # WHAT THIS DELIBERATELY DOES NOT BLOCK (the v3 friction lesson)
 #   git reset --hard / checkout . / restore . / clean -f / branch -D
@@ -101,8 +113,39 @@ if [ -z "$TOOL" ] && [ -z "$FILE" ] && [ -z "$CMD" ]; then
   FILE="$INPUT"; CMD="$INPUT"
 fi
 
-FILE="${FILE//\\//}"          # normalize windows separators
-CMD_N="${CMD//\\//}"
+# =========================================================================
+# 0. CODE-EXECUTION TOOLS THAT NEVER REACH THE CHECKS BELOW (added 2026-09-02)
+#
+#    Every check below reads `command` or `file_path`. A tool that executes
+#    code through a different field is invisible to all of them: an MCP python
+#    REPL and the IDE Jupyter bridge both carry `code`, and `python_repl`
+#    reading secrets/.env walked past the whole floor untouched (workspace
+#    audit 2026-09-02, verified by behavior). Matched on the tool NAME before
+#    any field is extracted, so a new field shape cannot reopen it. Bash stays
+#    the one audited execution lane. Client boxes ship with zero MCP servers,
+#    so on a client this never fires; it exists for the operator box and for
+#    any client who later adds a server.
+# =========================================================================
+case "$TOOL" in
+  *python_repl*|*executeCode*|*execute_code*|*run_code*|*exec_code*|*run_command*|*run_shell*|*shell_exec*|*execute_command*)
+    block "Security floor: code-execution tools outside the audited Bash lane (python_repl, executeCode, run_command) are not available on this machine."
+    ;;
+esac
+
+# Normalize Windows separators for MATCHING ONLY (never used as a path).
+# The payload is JSON, so a Windows path arrives escaped: C:\\Users\\x. A plain
+# backslash-to-slash replace turned that into C://Users//x, and every gate
+# pattern with an interior slash (.claude/hooks, .claude/settings.json,
+# command/floor) silently stopped matching on the normal Windows spelling.
+# Found by behavior 2026-09-02: Write C:\...\security-guard.sh ALLOW while
+# Write C:/.../security-guard.sh BLOCK. Fix: escaped pair -> one slash, then
+# any single backslash -> slash, then collapse whatever doubles remain.
+FILE="${FILE//\\\\//}"
+FILE="${FILE//\\//}"
+while [[ "$FILE" == *"//"* ]]; do FILE="${FILE//\/\//\/}"; done
+CMD_N="${CMD//\\\\//}"
+CMD_N="${CMD_N//\\//}"
+while [[ "$CMD_N" == *"//"* ]]; do CMD_N="${CMD_N//\/\//\/}"; done
 
 # =========================================================================
 # 1. SECRET EXFILTRATION - never legitimate for the assistant
@@ -180,13 +223,17 @@ fi
 #
 #    Blocks the assistant from rewriting its own gate on a single instruction
 #    (the prompt-injection case). Does NOT lock anyone out: the operator (or
-#    the client, deliberately) touches the sentinel, then edits within 15 min.
+#    the client, deliberately) touches the sentinel FROM THEIR OWN TERMINAL,
+#    then edits within 15 min.
 #
-#      touch <workspace>/.claude/hooks/.maintenance
+#      touch <workspace>/.claude/hooks/.maintenance      (Git Bash)
+#      New-Item <workspace>\.claude\hooks\.maintenance   (PowerShell)
 #      (plugin-carried guard: touch .maintenance beside the cached hook;
 #       .claude/plugins is gated too since v1.2.0, 2026-08-21)
 #
-#    Two deliberate steps beats one injected instruction.
+#    Two deliberate steps beats one injected instruction - which is only true
+#    if step one needs a human. Section 4a (2026-09-02) makes it so: the
+#    assistant cannot create the sentinel through any tool.
 # =========================================================================
 SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 MAINT="$SCRIPT_DIR/.maintenance"
@@ -210,6 +257,30 @@ targets_gate() {
      "$1" == *"command/floor"* ]]
 }
 
+# 4a. The sentinel itself (added 2026-09-02). `touch`, `New-Item` and `echo`
+#     were not write verbs, so the assistant could open its own window and
+#     edit the gate in the same turn (verified by behavior). Any tool call that
+#     names the sentinel is treated as a write unless it is a Read/Glob/Grep,
+#     or a bare read-only command shape (ls / stat / test / Test-Path /
+#     Get-Item) with no chaining, piping or substitution. There is no allowed
+#     way to create, touch, copy or write it through the assistant.
+if [[ "$FILE" == *".maintenance"* || "$CMD_N" == *".maintenance"* ]]; then
+  MAINT_OK=0
+  if [[ "$TOOL" == "Read" || "$TOOL" == "Glob" || "$TOOL" == "Grep" ]]; then
+    MAINT_OK=1
+  elif [ -z "$FILE" ] && [ -n "$CMD" ]; then
+    if [[ "$CMD_N" != *";"* && "$CMD_N" != *"&&"* && "$CMD_N" != *"||"* && "$CMD_N" != *"|"* && \
+          "$CMD_N" != *'$('* && "$CMD_N" != *'`'* && "$CMD_N" != *$'\n'* && "$CMD_N" != *"\\n"* ]]; then
+      case "$CMD_N" in
+        ls|ls\ *|stat\ *|test\ *|\[\ *|Test-Path*|Get-Item\ *) MAINT_OK=1 ;;
+      esac
+    fi
+  fi
+  if [ "$MAINT_OK" -eq 0 ]; then
+    block "Security floor: the maintenance sentinel is created by a person from their own terminal (PowerShell or Git Bash), never through the assistant. Create .maintenance beside security-guard.sh yourself, then retry within 15 minutes."
+  fi
+fi
+
 if targets_gate "$FILE" || targets_gate "$CMD_N"; then
   # reads stay allowed - only writes are gated
   WRITEISH=0
@@ -226,7 +297,7 @@ if targets_gate "$FILE" || targets_gate "$CMD_N"; then
     WRITEISH=1
   fi
   if [ "$WRITEISH" -eq 1 ] && ! maint_open; then
-    block "Security floor: the gate protects itself (hooks, settings, settings.local, .mcp.json, .claude.json, plugins, command/floor). To edit deliberately: touch a .maintenance file beside security-guard.sh, then retry within 15 minutes."
+    block "Security floor: the gate protects itself (hooks, settings, settings.local, .mcp.json, .claude.json, plugins, command/floor). To edit deliberately: from your OWN terminal, create a .maintenance file beside security-guard.sh, then retry within 15 minutes."
   fi
 fi
 

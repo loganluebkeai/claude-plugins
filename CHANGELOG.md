@@ -3,6 +3,21 @@
 One line per release. The plugin's `version` in plugin.json is the update
 signal; refresh with `/plugin marketplace update truenorth`.
 
+- **1.4.0** (2026-09-02): Workspace-audit fixes, three bypasses each verified
+  by behavior against 1.3.0. (1) Windows backslash paths un-gated the guard's
+  self-protection: a JSON-escaped `C:\\x` normalized to `C://x`, so every
+  gated pattern with an interior slash (`.claude/hooks`, `.claude/settings.json`,
+  `.claude/settings.local.json`, `.claude/plugins`, `command/floor`) matched on
+  forward-slash spellings only. Normalization now collapses the doubled
+  slashes. (2) The maintenance sentinel could be created by the assistant
+  (`touch` / `New-Item` / `echo` were not write verbs), collapsing the
+  two-step ceremony into one turn; section 4a now treats any tool call that
+  names `.maintenance` as a write unless it is a bare read-only shape - a
+  person creates the sentinel from their own terminal. (3) Section 0 blocks
+  code-execution tools by NAME (`python_repl`, `executeCode`, `run_command`)
+  before any field is read; they carry `code`, not `command`, and walked past
+  every check. Never fires on a zero-MCP client box. Battery: 129 cases (was
+  89); every new BLOCK case is a planted failure against 1.3.0.
 - **1.3.0** (2026-09-02): Escape-route pass. Section 5: a nested `claude`
   launch with the floor switched off (`--safe-mode`, `--restricted`,
   `--settings`, `--setting-sources`, `--plugin-dir`, or a `CLAUDE_CONFIG_DIR=`
