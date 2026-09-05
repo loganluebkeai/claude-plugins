@@ -11,6 +11,16 @@ Two hooks, one job: a hard floor under every permission mode.
 2. **`hooks/check-claude-code-version.mjs`** - SessionStart watcher. Nudges when the
    installed Claude Code is behind (stale installs carry security-fix gaps, not just
    feature gaps). Cached 24h, never blocks, silent on any error.
+3. **`verify-floor.sh`** - one command that proves the guard beside it BEHAVES
+   (blocks what it must, asks where it should, quiet on normal work) by piping
+   planted payloads straight into the hook - no model involved. After any update:
+
+   ```
+   bash ~/.claude/plugins/cache/truenorth/aios-security-floor/<version>/verify-floor.sh --all
+   ```
+
+   `--all` checks every copy on the machine and prints `FLOOR OK` or names the
+   probe that did not hold, tagged with the release it belongs to.
 
 ## What it deliberately does NOT do
 

@@ -28,6 +28,10 @@ is still there when it matters. In normal use this floor should never once trigg
 Each release bumps the plugin version. Your machine picks it up on the next
 marketplace refresh; nothing on your box is overwritten and nothing of yours is read.
 
+To see that an update really behaves (not just that it arrived), run the
+`verify-floor.sh` that ships inside the plugin - it prints `FLOOR OK` or names
+exactly which protection did not hold.
+
 ---
 
 Maintained by TrueNorth Intell. Source of truth for the guard lives in the operator
