@@ -84,6 +84,17 @@
 #     content mention (commit bodies, grep of the guard, git add lists,
 #     --help piped to sed). 1 ask lifted: a newline-glued `cat` that had
 #     read as the ncat network verb.
+#   * 2026-09-24 (plugin v1.6.1): section 5 gates CLAUDE_CODE_PLUGIN_DIRS,
+#     the env spelling of --plugin-dir (CLI 2.1.280+ loads every listed dir as
+#     a plugin; 1.6.0 blocked the flag and allowed the variable, measured
+#     9/23), and CLAUDE_CODE_SAFE_MODE / CLAUDE_CODE_RESTRICTED, the env
+#     spellings of --safe-mode / --restricted. Every gated name now matches in
+#     any case (Windows env keys are case-insensitive) and on PowerShell's env
+#     drive with any spacing ($env:NAME = 'x', +=, ${env:NAME}) - 1.6.0 let
+#     those through for CLAUDE_CONFIG_DIR and CLAUDE_CODE_SIMPLE too. New
+#     section 5b blocks a gated name written through the Windows environment
+#     (env: drive, SetEnvironmentVariable, setx, the registry Environment
+#     key), launch or not: those reach every future session.
 #
 # WHAT THIS DELIBERATELY DOES NOT BLOCK (the v3 friction lesson)
 #   git reset --hard / checkout . / restore . / clean -f / branch -D
@@ -94,7 +105,7 @@
 
 # Bumped with plugin.json on every release. verify-floor.sh prints it beside
 # the behavior probes; _test-floor-plugin.sh fails when the two disagree.
-GUARD_VERSION="1.6.0"
+GUARD_VERSION="1.6.1"
 
 INPUT=$(cat)
 
@@ -844,9 +855,11 @@ fi
 #
 #    A floored session can start a child session that never had a floor:
 #    --safe-mode and --restricted switch the settings layer off (user hooks
-#    and plugins never load), --setting-sources drops user settings,
-#    --plugin-dir loads arbitrary code, --settings injects configuration, and
-#    a redirected CLAUDE_CONFIG_DIR is a config dir with no floor in it.
+#    and plugins never load; CLAUDE_CODE_SAFE_MODE and CLAUDE_CODE_RESTRICTED
+#    are their env spellings, 1.6.1), --setting-sources drops user settings,
+#    --plugin-dir loads arbitrary code (so does CLAUDE_CODE_PLUGIN_DIRS, its
+#    env spelling, 1.6.1), --settings injects configuration, and a
+#    redirected CLAUDE_CONFIG_DIR is a config dir with no floor in it.
 #    Proven 8/29 (escape-route finding #10): the parent guard allowed the
 #    command, the child printed a planted key. A plain nested `claude -p` stays
 #    allowed - it fires in normal work and would get worked around. A nested
@@ -860,24 +873,64 @@ fi
 # was gated. CLAUDE_CODE_SIMPLE=1 is what --bare sets, so the env form is
 # gated too.
 RX_BARE='--bare([[:space:]=]|$)'
+# FLOOR_ENV_NAMES: the gated env set, one NAME= token per name. This line and
+# nothing else is what scripts/verify/floor_surface_probe.py and the bot
+# lane's strip-list parity case read: exactly one assignment in the file,
+# inside section 5, a plain quoted literal of NAME= tokens. Other CLAUDE_*=
+# text in this section (comments, messages) is not read, so a name belongs in
+# the gated set only by being on this line. 2026-09-24 (1.6.1) added
+# CLAUDE_CODE_PLUGIN_DIRS (--plugin-dir), CLAUDE_CODE_SAFE_MODE (--safe-mode;
+# measured 9/24 to switch plugins and hooks off in a real child) and
+# CLAUDE_CODE_RESTRICTED (the twin of --restricted, gated on the same
+# principle as the flag).
+FLOOR_ENV_NAMES='CLAUDE_CONFIG_DIR= CLAUDE_CODE_SIMPLE= CLAUDE_CODE_PLUGIN_DIRS= CLAUDE_CODE_SAFE_MODE= CLAUDE_CODE_RESTRICTED='
+# RX_FLOOR_NAMES: the same names in ANY case, as bracket classes ([Cc][Ll]..).
+# Windows env keys are case-insensitive - a lowercase key loaded a plugin in a
+# real child (measured 9/24). Built here without ${x,,} (bash 4 only; macOS
+# ships 3.2) and without a subshell (a fork per call slows every tool call).
+_UP=ABCDEFGHIJKLMNOPQRSTUVWXYZ; _LO=abcdefghijklmnopqrstuvwxyz; RX_FLOOR_NAMES=""
+for _n in $FLOOR_ENV_NAMES; do
+  _n="${_n%=}"; _rx=""
+  for (( _i=0; _i<${#_n}; _i++ )); do
+    _c="${_n:_i:1}"; _p="${_UP%%"$_c"*}"
+    if [ "${#_p}" -lt 26 ]; then _rx="$_rx[$_c${_LO:${#_p}:1}]"; else _rx="$_rx$_c"; fi
+  done
+  RX_FLOOR_NAMES="${RX_FLOOR_NAMES:+$RX_FLOOR_NAMES|}$_rx"
+done
+# floor_env <string>: an env form that starts a session without the floor.
+#   * the NAME= literal anywhere - the 1.3.0-1.6.0 test, kept exactly;
+#   * RX_FLOOR_ENV (1.6.1), any case: a prefix/export assignment or append
+#     (NAME=x, NAME+=x - a bash prefix append exports to the child), or
+#     PowerShell's env drive with any spacing ($env:NAME = 'x', += , and
+#     ${env:NAME} = 'x'). The spaced form is anchored on $env: - a bare
+#     `NAME = x` is a Python/Node assignment, a [[ ]] test or a hashtable
+#     key, not an environment write (the first 1.6.1 cut blocked all of
+#     those). `NAME == x` with spaces never matches; `NAME==x` does, as the
+#     literal always has.
+RX_FLOOR_ENV='[$][{]?[Ee][Nn][Vv]:('"$RX_FLOOR_NAMES"')[}]?[[:space:]]*[+]?=([^=]|$)|('"$RX_FLOOR_NAMES"')[+]?='
+floor_env() {
+  local n
+  for n in $FLOOR_ENV_NAMES; do [[ "$1" == *"$n"* ]] && return 0; done
+  [[ "$1" =~ $RX_FLOOR_ENV ]]
+}
 floor_off_flag() {
   [[ "$1" == *"--safe-mode"* || "$1" == *"--restricted"* || "$1" == *"--setting-sources"* || \
      "$1" == *"--plugin-dir"* || "$1" == *"--plugin-url"* || "$1" == *"--settings "* || \
-     "$1" == *"--settings="* || "$1" == *"CLAUDE_CONFIG_DIR="* || "$1" == *"CLAUDE_CODE_SIMPLE="* ]] || \
+     "$1" == *"--settings="* ]] || floor_env "$1" || \
   [[ "$1" =~ $RX_BARE ]]
 }
 RX_CLAUDE_WORD='(^|[^A-Za-z0-9_.-])claude([^A-Za-z0-9_-]|$)'
 names_claude() {
-  [[ "$1" =~ $RX_CLAUDE_WORD ]] || [[ "$1" == *"CLAUDE_CONFIG_DIR="* || "$1" == *"CLAUDE_CODE_SIMPLE="* ]]
+  [[ "$1" =~ $RX_CLAUDE_WORD ]] || floor_env "$1"
 }
 # The 1.5.0 space-delimited test, kept as the fallback for commands the stage
 # logic will not reason about (command substitution etc.): identical to what
-# shipped before, so an unclassifiable command decides exactly as 1.5.0 did.
+# shipped before, so an unclassifiable command decides exactly as 1.5.0 did -
+# except the env forms, which read through floor_env like everywhere else.
 names_claude_old() {
   [[ "$1" == "claude "* || "$1" == *" claude "* || "$1" == *"/claude "* || \
      "$1" == *$'\n'"claude "* || \
-     "$1" == *"claude.exe"* || "$1" == *"claude.cmd"* || \
-     "$1" == *"CLAUDE_CONFIG_DIR="* || "$1" == *"CLAUDE_CODE_SIMPLE="* ]]
+     "$1" == *"claude.exe"* || "$1" == *"claude.cmd"* ]] || floor_env "$1"
 }
 if [ -n "$CMD" ]; then
   # names_claude is a word match, wider than 1.5.0's space-delimited test:
@@ -915,8 +968,100 @@ if [ -n "$CMD" ]; then
       done
     fi
     if [ "$LAUNCH_HIT" -eq 1 ]; then
-      block "Security floor: starting a nested Claude Code session with the floor switched off (--safe-mode, --restricted, --bare, --setting-sources, --settings, --plugin-dir, --plugin-url, a redirected config dir) is blocked. A plain nested claude -p is fine."
+      block "Security floor: starting a nested Claude Code session with the floor switched off (--safe-mode, --restricted, --bare, --setting-sources, --settings, --plugin-dir, --plugin-url, or their env forms CLAUDE_CODE_SAFE_MODE, CLAUDE_CODE_RESTRICTED, CLAUDE_CODE_SIMPLE, CLAUDE_CODE_PLUGIN_DIRS, a redirected CLAUDE_CONFIG_DIR) is blocked. A plain nested claude -p is fine."
     fi
+  fi
+fi
+
+# =========================================================================
+# 5b. A FLOOR-OFF VARIABLE WRITTEN THROUGH THE WINDOWS ENVIRONMENT
+#     (added 2026-09-24, 1.6.1)
+#
+#    Section 5 sees a variable set on the command line that launches.
+#    Windows has other ways to set one, and some outlive the command: the
+#    PowerShell env drive (Set-Item env:NAME, New-Item -Path Env: -Name NAME)
+#    feeds a launch later in the same command; SetEnvironmentVariable at User
+#    or Machine scope, setx, and the registry's Environment key persist into
+#    every future session and into the self-restarting bot, launch or not.
+#    Measured 9/24: `Set-Item env:NAME ...; claude` passed 1.6.0 and the
+#    first 1.6.1 cut for every gated name.
+#
+#    ONE class rule: a gated name (FLOOR_ENV_NAMES, any case, as a word) in a
+#    command that also carries a Windows env-setting mechanism -
+#      env:                    the env drive as a path ($env: is section 5's)
+#      Environment             the provider by name (Environment::NAME, a new
+#                              PSDrive over it) and the registry key
+#                              (HKCU:\Environment, Session Manager\Environment)
+#      SetEnvironmentVariable  the .NET / Win32 setter, any scope
+#      setx
+#    - and then the stage logic decides content vs target, as in sections 4
+#    and 5. Every stage that names the variable must only read, remove or
+#    change location (a content verb, Remove-Item/Clear-Item and their
+#    aliases, Remove-ItemProperty, cd/Set-Location, reg query/delete); when it
+#    carries the mechanism too, it must not hold ( ) or { } outside quotes
+#    (PowerShell RUNS a parenthesized argument, and a script block runs where
+#    it lands); and it must not pipe into a stage that fails the same test.
+#    Anything else is a write.
+#    Aliases: the rule never lists a write verb, so si, ni, sc, cpi, rni and
+#    any alias or verb not yet invented fall on the write side by default. A
+#    read or remove spelling missing from the safe list costs a false block,
+#    never a bypass. Remove-Item Env:NAME and bash unset stay quiet; so do
+#    $env:NAME reads, [Environment]::GetEnvironmentVariable, and a commit
+#    message or grep that names both.
+# =========================================================================
+RX_FLOOR_NAME_WORD='(^|[^A-Za-z0-9_])('"$RX_FLOOR_NAMES"')([^A-Za-z0-9_]|$)'
+RX_ENV_MECH='(^|[^$A-Za-z0-9_{])[Ee][Nn][Vv]:|(^|[^A-Za-z0-9_[])[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt]([^]A-Za-z0-9_]|$)|[Ss][Ee][Tt][Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt][Vv][Aa][Rr][Ii][Aa][Bb][Ll][Ee]|(^|[^A-Za-z0-9_.-])[Ss][Ee][Tt][Xx]([^A-Za-z0-9_-]|$)'
+# env_safe_stage <stage>: 0 when the stage only reads, removes or changes
+# location. Verbs compare in any case (PowerShell cmdlets are case-
+# insensitive, so remove-item is Remove-Item): nocasematch is set for this
+# test only and put back. A shell that ignored it would only block more.
+env_safe_stage() {
+  local st="$1" s u="" v sub r=1 nc=0
+  s="$st"
+  while [[ "$s" =~ $RX_QUOTED ]]; do
+    u="$u${s%%"${BASH_REMATCH[1]}"*}"; s="${s#*"${BASH_REMATCH[1]}"}"
+  done
+  u="$u$s"
+  # a ( ) or { } is only a hiding place for a write when this stage carries
+  # the mechanism itself; a filter like Where-Object { $_ -match 'NAME' } in
+  # an audit of the registry is a read (found replaying real history, 9/24)
+  [[ "$st" =~ $RX_ENV_MECH ]] && [[ "$u" == *"("* || "$u" == *"{"* ]] && return 1
+  v=$(stage_verb "$st")
+  shopt -q nocasematch && nc=1
+  shopt -s nocasematch
+  if content_verb "$v" "$st"; then
+    r=0
+  else
+    case "$v" in
+      Remove-Item|ri|rm|del|erase|rd|rmdir|Clear-Item|cli|Remove-ItemProperty|rp|unset|\
+      Set-Location|sl|cd|chdir|Push-Location|pushd|Pop-Location|popd|Where-Object|where|'?') r=0 ;;
+      reg|reg.exe)
+        # the subcommand is the first word after the verb, nothing later
+        sub="${st#*"$v"}"; while [[ "$sub" == [[:space:]]* ]]; do sub="${sub:1}"; done
+        case "${sub%%[[:space:]]*}" in query|delete) r=0 ;; esac ;;
+    esac
+  fi
+  [ "$nc" -eq 1 ] || shopt -u nocasematch
+  return $r
+}
+if [ -n "$CMD" ] && [[ "$CMD_N" =~ $RX_FLOOR_NAME_WORD ]] && [[ "$CMD_N" =~ $RX_ENV_MECH ]]; then
+  ENV_HIT=0
+  if unclassifiable "$SK"; then
+    ENV_HIT=1
+  else
+    split_stages "$SK"
+    for (( i=0; i<${#STAGES[@]}; i++ )); do
+      [[ "${STAGES[$i]}" =~ $RX_FLOOR_NAME_WORD ]] || continue
+      env_safe_stage "${STAGES[$i]}" || { ENV_HIT=1; break; }
+      for (( j=i+1; j<${#STAGES[@]}; j++ )); do
+        [ "${STAGE_PID[$j]}" = "${STAGE_PID[$i]}" ] || break
+        env_safe_stage "${STAGES[$j]}" || { ENV_HIT=1; break; }
+      done
+      [ "$ENV_HIT" -eq 1 ] && break
+    done
+  fi
+  if [ "$ENV_HIT" -eq 1 ]; then
+    block "Security floor: setting a floor-off variable (CLAUDE_CONFIG_DIR, CLAUDE_CODE_SIMPLE, CLAUDE_CODE_PLUGIN_DIRS, CLAUDE_CODE_SAFE_MODE, CLAUDE_CODE_RESTRICTED) through the Windows environment (the env: drive, SetEnvironmentVariable, setx, the registry Environment key) is blocked: it reaches the next Claude Code session and every one after it. Removing one is fine: Remove-Item Env:NAME (or unset NAME) for this session, Remove-ItemProperty -Path HKCU:\\\\Environment -Name NAME (or reg delete HKCU\\\\Environment /v NAME /f) for a saved one. A note or commit message that names one: write it to a file (git commit -F <file>)."
   fi
 fi
 

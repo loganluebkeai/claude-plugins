@@ -3,6 +3,46 @@
 One line per release. The plugin's `version` in plugin.json is the update
 signal; refresh with `/plugin marketplace update truenorth`.
 
+- **1.6.1** (2026-09-24): The env spellings of the floor-off flags, and the
+  Windows ways to set them. CLI 2.1.280 added `CLAUDE_CODE_PLUGIN_DIRS`,
+  which loads every listed directory as a plugin exactly as `--plugin-dir`
+  does; 1.6.0 blocked the flag and allowed `CLAUDE_CODE_PLUGIN_DIRS=<d>
+  claude -p ...` (measured 9/23 on 2.1.281). Section 5 now gates it, plus
+  `CLAUDE_CODE_SAFE_MODE` (a real child with it set loaded no plugins or
+  hooks, measured 9/24) and `CLAUDE_CODE_RESTRICTED` (the twin of
+  `--restricted`), the way it gates `CLAUDE_CONFIG_DIR=`: prefix, `export`,
+  `env`, `cmd /c set`, a bash `+=`, and PowerShell's `$env:` / `${env:}`
+  assignment with any spacing. Names match in any case (Windows env keys are
+  case-insensitive; a lowercase key loaded a plugin, measured 9/24). The
+  spaced PowerShell form, `+=` and `${env:}` were gaps 1.6.0 already had for
+  `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_SIMPLE`. New section 5b: a gated name
+  written through the Windows environment - the `env:` drive (`Set-Item`,
+  `New-Item`, or any other verb or alias that is not a read or a remove),
+  `[Environment]::SetEnvironmentVariable` at any scope, `setx`, the
+  registry's `Environment` key - blocks whether or not the command launches
+  anything, because the persisted forms reach every future session.
+  Quiet: a plain read (`$env:NAME`, `Test-Path env:NAME`, `Get-Item
+  env:NAME`, `Get-ItemProperty -Path HKCU:\Environment -Name NAME`, `dir
+  env:NAME`, `Get-ChildItem env: | Where-Object Name -eq NAME`); grepping for
+  it; a plain nested `claude -p`; code with a same-named variable assigned
+  with spaces (`X = 1` in Python, a `[[ $X = y ]]` test, a PowerShell
+  hashtable key); a commit message naming it, with `git commit -m "..."` or
+  `git commit -F <file>`. Blocks, by design: an unspaced lowercase or
+  snake_case assignment of a gated name (`claude_config_dir=...` in code), as
+  the upper-case `NAME=` literal always has; a parenthesized read on the env
+  drive or registry (`(Get-Item env:NAME).Value`, `if (Test-Path env:NAME)
+  {..}`, `(Get-ItemProperty HKCU:\Environment).NAME`); a commit message
+  built inside `$( )` (`-m "$(cat <<'EOF' ... EOF)"`) that also says
+  `Environment`, `env:`, `setx` or `SetEnvironmentVariable` - write it to a
+  file and use `git commit -F <file>`; and clearing by assignment
+  (`$env:NAME = $null`). Removing one is quiet: `Remove-Item Env:NAME` (or
+  `unset NAME`) for this session, `Remove-ItemProperty -Path
+  HKCU:\Environment -Name NAME` (or `reg delete HKCU\Environment /v NAME /f`)
+  for a saved one; the block message says the same. Twelve `[1.6.1]` probes
+  in `verify-floor.sh` (nine block, three stay quiet); the plugin battery now
+  fails a release whose version is not a probe tag, and every block site's
+  reason is checked to parse as JSON. Battery: 322 cases (was 232); every new
+  BLOCK case is a planted failure against 1.6.0.
 - **1.6.0** (2026-09-04): Content-vs-target pass, plus two floor-off flags.
   A rule that scans the raw command string cannot tell a protected path
   NAMED AS CONTENT (a commit message, a heredoc body, a grep pattern, a note)

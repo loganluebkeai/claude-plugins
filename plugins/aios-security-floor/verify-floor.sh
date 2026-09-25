@@ -79,6 +79,21 @@ check_copy() { # <guard path>
   probe "$g" 2 1.6.0 "nested claude --bare blocks"                       "${B}claude --bare -p hi${E}"
   probe "$g" 2 1.6.0 "nested claude --plugin-url blocks"                 "${B}claude --plugin-url https://x.io/p.zip -p hi${E}"
   probe "$g" 2 1.6.0 "a launch on its own line (after a newline) blocks" "${B}echo hi\\nclaude --safe-mode -p x${E}"
+  # 1.6.1 - the env spellings of --plugin-dir and --safe-mode, in any case and
+  # with PowerShell spacing, and a floor-off variable written through the
+  # Windows environment (env: drive, the .NET setter, setx), launch or not
+  probe "$g" 2 1.6.1 "CLAUDE_CODE_PLUGIN_DIRS= before a launch blocks"     "${B}CLAUDE_CODE_PLUGIN_DIRS=/tmp/p claude -p hi${E}"
+  probe "$g" 2 1.6.1 "export CLAUDE_CODE_PLUGIN_DIRS, then a launch, blocks" "${B}export CLAUDE_CODE_PLUGIN_DIRS=/tmp/p; claude -p hi${E}"
+  probe "$g" 2 1.6.1 "PowerShell \$env:CLAUDE_CODE_PLUGIN_DIRS, then a launch, blocks" '{"tool_name":"PowerShell","tool_input":{"command":"$env:CLAUDE_CODE_PLUGIN_DIRS='"'"'C:\\p'"'"'; claude -p hi"}}'
+  probe "$g" 2 1.6.1 "PowerShell \$env:CLAUDE_CONFIG_DIR = (spaced), then a launch, blocks" '{"tool_name":"PowerShell","tool_input":{"command":"$env:CLAUDE_CONFIG_DIR = '"'"'C:\\c'"'"'; claude -p hi"}}'
+  probe "$g" 2 1.6.1 "a lowercase claude_code_plugin_dirs= before a launch blocks" "${B}claude_code_plugin_dirs=/tmp/p claude -p hi${E}"
+  probe "$g" 2 1.6.1 "CLAUDE_CODE_SAFE_MODE= before a launch blocks"       "${B}CLAUDE_CODE_SAFE_MODE=1 claude -p hi${E}"
+  probe "$g" 2 1.6.1 "PowerShell Set-Item env:CLAUDE_CONFIG_DIR blocks, no launch needed" '{"tool_name":"PowerShell","tool_input":{"command":"Set-Item env:CLAUDE_CONFIG_DIR '"'"'C:\\c'"'"'"}}'
+  probe "$g" 2 1.6.1 "SetEnvironmentVariable at User scope blocks"         '{"tool_name":"PowerShell","tool_input":{"command":"[Environment]::SetEnvironmentVariable('"'"'CLAUDE_CONFIG_DIR'"'"', '"'"'C:\\c'"'"', '"'"'User'"'"')"}}'
+  probe "$g" 2 1.6.1 "setx CLAUDE_CODE_PLUGIN_DIRS blocks"                 "${B}setx CLAUDE_CODE_PLUGIN_DIRS C:\\\\p${E}"
+  probe "$g" 0 1.6.1 "unset CLAUDE_CODE_PLUGIN_DIRS is quiet"              "${B}unset CLAUDE_CODE_PLUGIN_DIRS${E}"
+  probe "$g" 0 1.6.1 "PowerShell Remove-Item Env:CLAUDE_CODE_PLUGIN_DIRS is quiet" '{"tool_name":"PowerShell","tool_input":{"command":"Remove-Item Env:CLAUDE_CODE_PLUGIN_DIRS"}}'
+  probe "$g" 0 1.6.1 "a [[ \$CLAUDE_CONFIG_DIR = x ]] test is quiet"       '{"tool_name":"Bash","tool_input":{"command":"[[ $CLAUDE_CONFIG_DIR = /tmp/c ]] && echo same"}}'
   if [ "$TOTAL_FAIL" -gt "$before" ]; then
     STALE="$STALE
     $g (declares $ver): $((TOTAL_FAIL-before)) probe(s) did not hold"
